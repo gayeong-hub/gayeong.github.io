@@ -1,151 +1,79 @@
+
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <title>ESP32 실시간 온습도</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- ✅ Paho MQTT (WebSocket) 공식 CDN: 반드시 먼저 로드 -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/mqttws31.min.js"></script>
-
-  <style>
-    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 24px; }
-    .card { max-width: 560px; margin: 0 auto; border: 1px solid #ddd; border-radius: 12px; padding: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
-    h1 { font-size: 20px; margin: 0 0 12px; }
-    .row { display: flex; gap: 12px; margin: 8px 0; align-items: baseline; }
-    .label { width: 110px; color: #666; }
-    .value { font-weight: 700; font-size: 20px; word-break: break-all; }
-    .ok { color: #1b7f1b; }
-    .err { color: #c62828; }
-    .dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:6px; }
-    code { font-size: 12px; }
-  </style>
+    <meta charset="utf-8" />
+    <title>My</title>
+    <H3>나의 웹(1970044, 서가영)</H3>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script>
+        const brokerUrl = 'wss://damoa.io:9002';
+    
+        // 고유한 클라이언트 ID 생성 (다른 사용자와 충돌 방지)
+        const clientId = 'iot-client-' + Math.random().toString(16).substr(2, 8);
+        
+        // 별도 인증이 필요 없으므로 options 객체는 간단하게 clientId만 포함
+        const options = {
+          clientId: clientId,
+        };
+    
+        console.log(`MQTT 브로커(${brokerUrl})에 접속을 시도합니다...`);
+        const client = mqtt.connect(brokerUrl, options);
+    
+        // 1. 브로커 접속 성공 시 실행되는 이벤트
+        client.on('connect', () => {
+            console.log(`✅ 접속 성공! (클라이언트 ID: ${clientId})`);
+    
+            // 2. 접속 성공 후 토픽 구독
+            const topic = `ewha/1970044`; // 다른 사용자와 겹치지 않도록 고유한 토픽 사용, 본인학번으로 수정
+            client.subscribe(topic, (err) => {
+                if (!err) {
+                    console.log(`📄 토픽 구독 성공: ${topic}`);
+    
+                    // 3. 구독 성공 후 해당 토픽으로 메시지 발행
+                    //const message = 'Hello, MQTT from browser!';
+                    //console.log(`🚀 메시지 발행: "${message}"`);
+                    //client.publish(topic, message);
+                    client.publish('ewha/checkin', "본인학번 이름");
+                } else {
+                    console.error('토픽 구독 오류:', err);
+                }
+            });
+        });
+    
+        // 4. 구독한 토픽으로 메시지가 들어왔을 때 실행되는 이벤트
+        client.on('message', (topic, message) => {
+            console.log(`${topic} ${message.toString()}`);
+            // 1. id가 'main'인 div 요소를 찾습니다.
+            const mainDiv = document.getElementById('main');
+    
+            // 2. 새로 추가할 HTML 코드를 문자열로 만듭니다. (백틱 `` 사용)
+            const messageHTML = `
+                <div class="message-item">
+                    <span>${message.toString()}</span>
+                </div>
+            `;
+    
+            // 3. 새로운 HTML을 적용 합니다.
+            mainDiv.innerHTML = messageHTML;
+            
+            // 스크롤을 항상 아래로 이동시켜 최신 메시지를 보여줍니다.
+            mainDiv.scrollTop = mainDiv.scrollHeight;
+    
+            // 모든 작업 완료 후 접속 종료
+            //client.end();
+            //console.log('🔚 작업 완료 후 접속을 종료합니다.');
+        });
+        
+        // 접속 중 에러 발생 시
+        client.on('error', (err) => {
+            console.error('연결 오류:', err);
+            client.end();
+        });
+    </script>
 </head>
+    
 <body>
-  <div class="card">
-    <h1>ESP32 실시간 온습도</h1>
-
-    <div class="row">
-      <span class="label">브로커 상태</span>
-      <span id="status" class="value err"><span class="dot" style="background:#c62828"></span>DISCONNECTED</span>
-    </div>
-
-    <div class="row">
-      <span class="label">Topic</span>
-      <span class="value" id="topic">ewha/1970044</span>
-    </div>
-
-    <div class="row">
-      <span class="label">온도</span>
-      <span class="value" id="temp">--.- °C</span>
-    </div>
-
-    <div class="row">
-      <span class="label">습도</span>
-      <span class="value" id="hum">--.- %</span>
-    </div>
-
-    <div class="row">
-      <span class="label">최근 수신</span>
-      <span class="value" id="ts">--</span>
-    </div>
-
-    <div class="row">
-      <span class="label">원본 JSON</span>
-      <span id="raw" class="value" style="font-weight:400; font-size:14px;"><code>(대기중)</code></span>
-    </div>
-  </div>
-
-  <script>
-    // ===== 설정 =====
-    const TOPIC   = "ewha/1970044"; // ✏️ 필요한 경우 학번/토픽에 맞게 수정
-    const USE_SSL = true;           // GitHub Pages(HTTPS)에서는 true -> WSS 사용
-    const HOST    = "damoa.io";
-    const PORT    = 9002;           // WSS 포트
-    const PATH    = "/mqtt";        // 웹소켓 경로
-
-    // DOM 핸들
-    const elStatus = document.getElementById('status');
-    const elTopic  = document.getElementById('topic');
-    const elTemp   = document.getElementById('temp');
-    const elHum    = document.getElementById('hum');
-    const elTs     = document.getElementById('ts');
-    const elRaw    = document.getElementById('raw');
-
-    // 상태 표시
-    function setStatus(connected) {
-      if (connected) {
-        elStatus.classList.remove('err');
-        elStatus.classList.add('ok');
-        elStatus.innerHTML = '<span class="dot" style="background:#1b7f1b"></span>CONNECTED';
-      } else {
-        elStatus.classList.remove('ok');
-        elStatus.classList.add('err');
-        elStatus.innerHTML = '<span class="dot" style="background:#c62828"></span>DISCONNECTED';
-      }
-    }
-
-    function tsToString(ts) {
-      if (!ts || isNaN(ts)) return new Date().toLocaleString();
-      return new Date(Number(ts) * 1000).toLocaleString();
-    }
-
-    // ===== Paho MQTT(WebSocket) 클라이언트 생성 =====
-    if (typeof Paho === "undefined") {
-      // 라이브러리 로드 실패 시 안내
-      document.body.insertAdjacentHTML(
-        'beforeend',
-        '<p style="color:#c62828;margin-top:12px;">Paho MQTT 라이브러리를 불러오지 못했습니다. 네트워크/HTTPS 차단을 확인하세요.</p>'
-      );
-      throw new Error("Paho MQTT library not loaded");
-    }
-
-    const clientId = "web-sub-1970044-" + Math.random().toString(16).slice(2);
-    const client = new Paho.MQTT.Client(HOST, Number(PORT), PATH, clientId);
-
-    client.onConnectionLost = function(resp) {
-      setStatus(false);
-      console.log("[MQTT] connection lost:", resp.errorMessage);
-      // 재시도
-      setTimeout(connect, 1500);
-    };
-
-    client.onMessageArrived = function(message) {
-      const payload = message.payloadString || "";
-      elRaw.textContent = payload;
-      try {
-        const obj = JSON.parse(payload);
-        // 키 이름은 ESP32 발행(JSON) 형식에 맞춤: temp, hum, ts
-        if (typeof obj.temp !== "undefined") elTemp.textContent = obj.temp + " °C";
-        if (typeof obj.hum  !== "undefined") elHum.textContent  = obj.hum  + " %";
-        elTs.textContent = obj.ts ? tsToString(obj.ts) : new Date().toLocaleString();
-      } catch (e) {
-        console.error("JSON parse error:", e);
-      }
-    };
-
-    function connect() {
-      setStatus(false);
-      console.log("[MQTT] connecting to", (USE_SSL ? "wss" : "ws") + "://" + HOST + ":" + PORT + PATH);
-      client.connect({
-        useSSL: USE_SSL,
-        timeout: 10,
-        cleanSession: true,
-        onSuccess: function() {
-          console.log("[MQTT] connected");
-          setStatus(true);
-          elTopic.textContent = TOPIC;
-          client.subscribe(TOPIC, { qos: 0 });
-        },
-        onFailure: function(err) {
-          console.log("[MQTT] connect failed", err);
-          setStatus(false);
-          setTimeout(connect, 2000);
-        }
-      });
-    }
-
-    connect();
-  </script>
+<div id="main"></div>
 </body>
 </html>
